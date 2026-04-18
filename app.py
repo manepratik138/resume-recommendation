@@ -1,27 +1,52 @@
 import streamlit as st
 
-st.title("AI Resume Recommendation System 🤖")
+st.set_page_config(page_title="AI Job Portal", layout="wide")
 
-name = st.text_input("Enter your name")
-uploaded_file = st.file_uploader("Upload your Resume (PDF)", type=["pdf"])
+st.title("💼 Dynamic AI Job Portal")
 
-skills = st.text_area("Or enter your skills manually (comma separated)")
-experience = st.slider("Experience (years)", 0, 10)
+# ---------------- SESSION STORAGE ----------------
+if "jobs" not in st.session_state:
+    st.session_state.jobs = []
 
-if st.button("Analyze Resume"):
+# ---------------- ADD NEW COMPANY ----------------
+st.header("➕ Add New Company / Internship")
 
-    st.write("Hello", name)
+title = st.text_input("Job Title")
+company = st.text_input("Company Name")
+skills = st.text_input("Skills Required")
+location = st.text_input("Location")
 
-    skill_list = skills.lower().split(",")
+if st.button("Add Job"):
 
-    if "python" in skill_list and experience >= 2:
-        st.success("Recommended Role: Data Scientist / Python Developer 🐍")
+    if title and company:
 
-    elif "java" in skill_list:
-        st.success("Recommended Role: Backend Developer ☕")
+        st.session_state.jobs.append({
+            "title": title,
+            "company": company,
+            "skills": skills,
+            "location": location
+        })
 
-    elif "html" in skill_list or "css" in skill_list:
-        st.success("Recommended Role: Frontend Developer 🎨")
+        st.success("Job Added Successfully ✔️")
 
-    else:
-        st.info("Recommended Role: Intern / Learning Stage 🚀")
+# ---------------- SEARCH ----------------
+st.markdown("---")
+search = st.text_input("🔍 Search Jobs")
+
+st.markdown("---")
+
+# ---------------- DISPLAY JOBS ----------------
+for job in st.session_state.jobs:
+
+    if search.lower() in job["title"].lower() or search == "":
+
+        with st.container():
+            st.subheader(job["title"])
+            st.write("🏢 Company:", job["company"])
+            st.write("📍 Location:", job["location"])
+            st.write("🧠 Skills:", job["skills"])
+
+            if st.button(f"Apply {job['title']}"):
+                st.success("Application Sent ✔️ (Demo)")
+
+        st.markdown("---")
