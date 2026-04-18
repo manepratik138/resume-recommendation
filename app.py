@@ -1,38 +1,52 @@
 import streamlit as st
 import sqlite3
 import PyPDF2
+import smtplib
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 from datetime import datetime
 
-st.set_page_config(page_title="HireAI SaaS", layout="wide")
+st.set_page_config(page_title="AI Hiring SaaS", layout="wide")
 
-st.title("🚀 HireAI - Startup Job Portal")
+st.title("💼 AI Hiring SaaS 🚀 (Startup Level)")
 
 # ---------------- DATABASE ----------------
-conn = sqlite3.connect("startup.db", check_same_thread=False)
+conn = sqlite3.connect("ai_hiring.db", check_same_thread=False)
 c = conn.cursor()
 
 c.execute('''CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    type TEXT,
     name TEXT,
     email TEXT,
-    password TEXT,
-    role TEXT,
     skills TEXT,
     resume TEXT,
-    score INTEGER,
     time TEXT
 )''')
 
 c.execute('''CREATE TABLE IF NOT EXISTS jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     company TEXT,
+    email TEXT,
     title TEXT,
-    skills TEXT,
-    location TEXT
+    description TEXT
 )''')
 
 conn.commit()
+
+# ---------------- EMAIL ----------------
+def send_email(to_email, subject, message):
+
+    sender_email = "your_email@gmail.com"
+    app_password = "your_app_password"
+
+    server = smtplib.SMTP("smtp.gmail.com", 587)
+    server.starttls()
+    server.login(sender_email, app_password)
+
+    msg = f"Subject: {subject}\n\n{message}"
+    server.sendmail(sender_email, to_email, msg)
+
+    server.quit()
 
 # ---------------- PDF ----------------
 def extract_text(file):
@@ -43,45 +57,28 @@ def extract_text(file):
             text += page.extract_text()
     return text.lower()
 
-# ---------------- AI ----------------
-def get_role(text):
-    if "python" in text:
-        return "Data Scientist"
-    elif "html" in text or "css" in text:
-        return "Frontend Developer"
-    elif "java" in text:
-        return "Backend Developer"
-    else:
-        return "Intern"
+# ---------------- AI MODEL ----------------
+def rank_resume(resume_text, job_desc):
 
-def get_score(text):
-    score = 0
-    keywords = {
-        "python": 30,
-        "machine learning": 40,
-        "html": 15,
-        "css": 15,
-        "java": 25
-    }
+    texts = [resume_text, job_desc]
 
-    for k, v in keywords.items():
-        if k in text:
-            score += v
+    vectorizer = TfidfVectorizer()
+    vectors = vectorizer.fit_transform(texts)
 
-    return min(score, 100)
+    score = cosine_similarity(vectors[0], vectors[1])[0][0]
+
+    return round(score * 100, 2)
 
 # ---------------- TABS ----------------
-tab1, tab2, tab3 = st.tabs(["👨‍🎓 Student", "🏢 Company", "💼 Jobs"])
+tab1, tab2 = st.tabs(["👨‍🎓 Student", "🏢 Company"])
 
 # ================= STUDENT =================
 with tab1:
 
-    st.header("Student Signup / Apply")
+    st.header("Student Apply")
 
     name = st.text_input("Name")
     email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
-
     skills = st.text_area("Skills")
     file = st.file_uploader("Upload Resume", type=["pdf"])
 
@@ -91,21 +88,16 @@ with tab1:
 
     full_text = (skills + " " + resume_text).lower()
 
-    if st.button("Register / Apply"):
-
-        role = get_role(full_text)
-        score = get_score(full_text)
+    if st.button("Apply"):
 
         time_now = str(datetime.now())
 
-        c.execute("""INSERT INTO users 
-        (type, name, email, password, role, skills, resume, score, time)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        ("student", name, email, password, role, skills, resume_text, score, time_now))
+        c.execute("INSERT INTO users (name, email, skills, resume, time) VALUES (?, ?, ?, ?, ?)",
+                  (name, email, skills, resume_text, time_now))
 
         conn.commit()
 
-        st.success(f"Registered ✔️ Role: {role} Score: {score}")
+        st.success("Applied Successfully ✔️")
 
 # ================= COMPANY =================
 with tab2:
@@ -113,42 +105,80 @@ with tab2:
     st.header("Company Dashboard")
 
     cname = st.text_input("Company Name")
+    cemail = st.text_input("Company Email")
 
     title = st.text_input("Job Title")
-    jskills = st.text_input("Required Skills")
-    location = st.text_input("Location")
+    desc = st.text_area("Job Description")
 
     if st.button("Post Job"):
 
-        c.execute("INSERT INTO jobs (company, title, skills, location) VALUES (?, ?, ?, ?)",
-                  (cname, title, jskills, location))
+        c.execute("INSERT INTO jobs (company, email, title, description) VALUES (?, ?, ?, ?)",
+                  (cname, cemail, title, desc))
 
         conn.commit()
 
         st.success("Job Posted ✔️")
 
-    st.subheader("Applicants")
+        # ---------------- AUTO MATCHING ----------------
+        c.execute("SELECT name, email, resume FROM users")
+        users = c.fetchall()
 
-    c.execute("SELECT name, email, role, skills, score FROM users WHERE type='student' ORDER BY score DESC")
-    data = c.fetchall()
+        best_candidates = []
 
-    for row in data:
-        st.write("👤", row[0], "|", row[1], "|", row[2], "| Score:", row[4])
+        for u in users:
+            score = rank_resume(u[2], desc)
+
+            best_candidates.append((u[0], u[1], score))
+
+        best_candidates.sort(key=lambda x: x[2], reverse=True)
+
+        top = best_candidates[0]
+
+        # ---------------- EMAIL TO COMPANY ----------------
+        send_email(
+            cemail,
+            "🎯 Best Candidate Found",
+            f"""
+Best Match Candidate:
+
+Name: {top[0]}
+Email: {top[1]}
+Match Score: {top[2]}%
+
+Job: {title}
+"""
+        )
+
+        st.success("Company Email Sent with Best Candidate ✔️")
+
+    st.subheader("Ranked Candidates")
+
+    c.execute("SELECT name, email, resume FROM users")
+    users = c.fetchall()
+
+    for u in users:
+
+        score = rank_resume(u[2], desc)
+
+        st.write("👤", u[0])
+        st.write("📧", u[1])
+        st.write("⭐ Match:", score, "%")
         st.markdown("---")
 
-# ================= JOBS =================
-with tab3:
+        # ---------------- AUTO EMAIL TO STUDENT ----------------
+        if score > 70:
 
-    st.header("Available Jobs")
+            send_email(
+                u[1],
+                "🎉 You are Shortlisted!",
+                f"""
+Congratulations {u[0]}!
 
-    c.execute("SELECT company, title, skills, location FROM jobs")
-    jobs = c.fetchall()
+You are shortlisted for:
+{title}
 
-    for job in jobs:
-        st.subheader(job[1])
-        st.write("🏢", job[0])
-        st.write("🧠 Skills:", job[2])
-        st.write("📍", job[3])
+Match Score: {score}%
 
-        if st.button(f"Apply {job[1]}"):
-            st.success("Application Sent ✔️ (Demo)")
+- AI Hiring System
+"""
+            )
