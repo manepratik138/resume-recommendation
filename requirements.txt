@@ -1,2 +1,4 @@
 streamlit
 PyPDF2
+sqlite3
+twilio
