@@ -1,15 +1,40 @@
 import streamlit as st
+import sqlite3
 import PyPDF2
+from datetime import datetime
 
-st.set_page_config(page_title="AI Internship Portal", layout="wide")
+st.set_page_config(page_title="HireAI SaaS", layout="wide")
 
-st.title("💼 AI Internship Portal 🤖")
+st.title("🚀 HireAI - Startup Job Portal")
 
-# ---------------- SESSION STORAGE ----------------
-if "jobs" not in st.session_state:
-    st.session_state.jobs = []
+# ---------------- DATABASE ----------------
+conn = sqlite3.connect("startup.db", check_same_thread=False)
+c = conn.cursor()
 
-# ---------------- PDF TEXT ----------------
+c.execute('''CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT,
+    name TEXT,
+    email TEXT,
+    password TEXT,
+    role TEXT,
+    skills TEXT,
+    resume TEXT,
+    score INTEGER,
+    time TEXT
+)''')
+
+c.execute('''CREATE TABLE IF NOT EXISTS jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company TEXT,
+    title TEXT,
+    skills TEXT,
+    location TEXT
+)''')
+
+conn.commit()
+
+# ---------------- PDF ----------------
 def extract_text(file):
     reader = PyPDF2.PdfReader(file)
     text = ""
@@ -18,71 +43,112 @@ def extract_text(file):
             text += page.extract_text()
     return text.lower()
 
-# ---------------- ADD COMPANY / INTERNSHIP ----------------
-st.header("➕ Add Company / Internship")
+# ---------------- AI ----------------
+def get_role(text):
+    if "python" in text:
+        return "Data Scientist"
+    elif "html" in text or "css" in text:
+        return "Frontend Developer"
+    elif "java" in text:
+        return "Backend Developer"
+    else:
+        return "Intern"
 
-col1, col2 = st.columns(2)
+def get_score(text):
+    score = 0
+    keywords = {
+        "python": 30,
+        "machine learning": 40,
+        "html": 15,
+        "css": 15,
+        "java": 25
+    }
 
-with col1:
-    title = st.text_input("Internship Title")
-    company = st.text_input("Company Name")
+    for k, v in keywords.items():
+        if k in text:
+            score += v
 
-with col2:
-    skills = st.text_input("Required Skills (comma separated)")
+    return min(score, 100)
+
+# ---------------- TABS ----------------
+tab1, tab2, tab3 = st.tabs(["👨‍🎓 Student", "🏢 Company", "💼 Jobs"])
+
+# ================= STUDENT =================
+with tab1:
+
+    st.header("Student Signup / Apply")
+
+    name = st.text_input("Name")
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
+
+    skills = st.text_area("Skills")
+    file = st.file_uploader("Upload Resume", type=["pdf"])
+
+    resume_text = ""
+    if file:
+        resume_text = extract_text(file)
+
+    full_text = (skills + " " + resume_text).lower()
+
+    if st.button("Register / Apply"):
+
+        role = get_role(full_text)
+        score = get_score(full_text)
+
+        time_now = str(datetime.now())
+
+        c.execute("""INSERT INTO users 
+        (type, name, email, password, role, skills, resume, score, time)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        ("student", name, email, password, role, skills, resume_text, score, time_now))
+
+        conn.commit()
+
+        st.success(f"Registered ✔️ Role: {role} Score: {score}")
+
+# ================= COMPANY =================
+with tab2:
+
+    st.header("Company Dashboard")
+
+    cname = st.text_input("Company Name")
+
+    title = st.text_input("Job Title")
+    jskills = st.text_input("Required Skills")
     location = st.text_input("Location")
 
-if st.button("Add Internship"):
+    if st.button("Post Job"):
 
-    if title and company:
-        st.session_state.jobs.append({
-            "title": title,
-            "company": company,
-            "skills": skills,
-            "location": location
-        })
+        c.execute("INSERT INTO jobs (company, title, skills, location) VALUES (?, ?, ?, ?)",
+                  (cname, title, jskills, location))
 
-        st.success("Internship Added ✔️")
+        conn.commit()
 
-st.markdown("---")
+        st.success("Job Posted ✔️")
 
-# ---------------- USER RESUME ----------------
-st.header("📄 Find Internship Using Resume")
+    st.subheader("Applicants")
 
-name = st.text_input("Your Name")
-file = st.file_uploader("Upload Resume (PDF)", type=["pdf"])
-manual_skills = st.text_area("Or Enter Skills Manually")
+    c.execute("SELECT name, email, role, skills, score FROM users WHERE type='student' ORDER BY score DESC")
+    data = c.fetchall()
 
-resume_text = ""
+    for row in data:
+        st.write("👤", row[0], "|", row[1], "|", row[2], "| Score:", row[4])
+        st.markdown("---")
 
-if file:
-    resume_text = extract_text(file)
+# ================= JOBS =================
+with tab3:
 
-all_input = (resume_text + " " + manual_skills).lower()
+    st.header("Available Jobs")
 
-st.markdown("---")
+    c.execute("SELECT company, title, skills, location FROM jobs")
+    jobs = c.fetchall()
 
-# ---------------- DISPLAY + MATCH ----------------
-st.header("🔥 Available Internships")
+    for job in jobs:
+        st.subheader(job[1])
+        st.write("🏢", job[0])
+        st.write("🧠 Skills:", job[2])
+        st.write("📍", job[3])
 
-for job in st.session_state.jobs:
-
-    st.subheader(job["title"])
-    st.write("🏢 Company:", job["company"])
-    st.write("📍 Location:", job["location"])
-    st.write("🧠 Skills:", job["skills"])
-
-    # ---------------- AI MATCH ----------------
-    match = False
-
-    for skill in job["skills"].lower().split(","):
-        if skill.strip() in all_input:
-            match = True
-
-    if match:
-        st.success("🔥 MATCH FOUND for you!")
-    else:
-        st.info("Not a match yet")
-
-    # ---------------- APPLY ----------------
-    if st.button(f"Apply - {job['title']}"):
-        st.success(f"Application Sent by {name} ✔️")
+        if st.button(f"Apply {job[1]}"):
+            st.success("Application Sent ✔️ (Demo)")
