@@ -1,26 +1,15 @@
 import streamlit as st
 import sqlite3
-import PyPDF2
-import smtplib
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from datetime import datetime
-
-st.set_page_config(page_title="AI Hiring SaaS", layout="wide")
-
-st.title("💼 AI Resume + Job Portal SaaS 🚀")
 
 # ---------------- DATABASE ----------------
-conn = sqlite3.connect("ai_saas.db", check_same_thread=False)
+conn = sqlite3.connect("saas.db", check_same_thread=False)
 c = conn.cursor()
 
 c.execute('''CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT,
     email TEXT,
-    skills TEXT,
-    resume TEXT,
-    time TEXT
+    skills TEXT
 )''')
 
 c.execute('''CREATE TABLE IF NOT EXISTS jobs (
@@ -33,156 +22,84 @@ c.execute('''CREATE TABLE IF NOT EXISTS jobs (
 
 conn.commit()
 
-# ---------------- EMAIL ----------------
-def send_email(to_email, subject, message):
+# ---------------- FUNCTIONS ----------------
+def add_user(name, email, skills):
+    c.execute("INSERT INTO users (name,email,skills) VALUES (?,?,?)",
+              (name, email, skills))
+    conn.commit()
 
-    sender_email = "your_email@gmail.com"
-    app_password = "your_app_password"
+def add_job(company, email, title, desc):
+    c.execute("INSERT INTO jobs (company,email,title,description) VALUES (?,?,?,?)",
+              (company, email, title, desc))
+    conn.commit()
 
-    try:
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-        server.starttls()
-        server.login(sender_email, app_password)
+def get_jobs():
+    return c.execute("SELECT * FROM jobs").fetchall()
 
-        msg = f"Subject: {subject}\n\n{message}"
-        server.sendmail(sender_email, to_email, msg)
-        server.quit()
+def get_users():
+    return c.execute("SELECT * FROM users").fetchall()
 
-    except Exception as e:
-        st.warning(f"Email failed: {e}")
+# ---------------- UI ----------------
+st.set_page_config(page_title="AI Hiring SaaS", layout="wide")
 
-# ---------------- PDF ----------------
-def extract_text(file):
-    reader = PyPDF2.PdfReader(file)
-    text = ""
-    for page in reader.pages:
-        if page.extract_text():
-            text += page.extract_text()
-    return text.lower()
+st.title("💼 AI Hiring SaaS 🚀")
 
-# ---------------- AI MODEL ----------------
-def rank_resume(resume_text, job_desc):
+menu = st.sidebar.selectbox("Menu", ["Student Apply", "Company Post", "Jobs", "Admin Panel"])
 
-    if not resume_text or not job_desc:
-        return 0
+# ---------------- STUDENT ----------------
+if menu == "Student Apply":
 
-    vectorizer = TfidfVectorizer()
-    vectors = vectorizer.fit_transform([resume_text, job_desc])
-
-    score = cosine_similarity(vectors[0], vectors[1])[0][0]
-
-    return round(score * 100, 2)
-
-# ---------------- TABS ----------------
-tab1, tab2 = st.tabs(["👨‍🎓 Student", "🏢 Company"])
-
-# ================= STUDENT =================
-with tab1:
-
-    st.header("Student Apply")
+    st.header("👨‍🎓 Student Apply")
 
     name = st.text_input("Name")
     email = st.text_input("Email")
     skills = st.text_area("Skills")
-    file = st.file_uploader("Upload Resume (PDF)", type=["pdf"])
 
-    resume_text = ""
-    if file:
-        resume_text = extract_text(file)
-
-    if st.button("Apply Now"):
-
-        time_now = str(datetime.now())
-
-        c.execute("INSERT INTO users (name, email, skills, resume, time) VALUES (?, ?, ?, ?, ?)",
-                  (name, email, skills, resume_text, time_now))
-
-        conn.commit()
-
+    if st.button("Apply"):
+        add_user(name, email, skills)
         st.success("Applied Successfully ✔️")
 
-# ================= COMPANY =================
-with tab2:
+# ---------------- COMPANY ----------------
+elif menu == "Company Post":
 
-    st.header("Company Dashboard")
+    st.header("🏢 Company Job Post")
 
-    cname = st.text_input("Company Name")
-    cemail = st.text_input("Company Email")
-
+    company = st.text_input("Company Name")
+    email = st.text_input("Company Email")
     title = st.text_input("Job Title")
     desc = st.text_area("Job Description")
 
     if st.button("Post Job"):
-
-        c.execute("INSERT INTO jobs (company, email, title, description) VALUES (?, ?, ?, ?)",
-                  (cname, cemail, title, desc))
-
-        conn.commit()
-
+        add_job(company, email, title, desc)
         st.success("Job Posted ✔️")
 
-        # ---------------- GET USERS ----------------
-        c.execute("SELECT name, email, resume FROM users")
-        users = c.fetchall()
+# ---------------- JOBS ----------------
+elif menu == "Jobs":
 
-        ranked = []
+    st.header("💼 Available Jobs")
 
-        for u in users:
-            score = rank_resume(u[2], desc)
-            ranked.append((u[0], u[1], score))
+    jobs = get_jobs()
 
-        ranked.sort(key=lambda x: x[2], reverse=True)
-
-        if ranked:
-
-            top = ranked[0]
-
-            # EMAIL TO COMPANY
-            send_email(
-                cemail,
-                "🎯 Best Candidate Found",
-                f"""
-Best Candidate:
-
-Name: {top[0]}
-Email: {top[1]}
-Match Score: {top[2]}%
-
-Job: {title}
-"""
-            )
-
-            # EMAIL TO TOP STUDENT
-            if top[2] > 70:
-
-                send_email(
-                    top[1],
-                    "🎉 You are Shortlisted!",
-                    f"""
-Congratulations {top[0]}!
-
-You are shortlisted for:
-{title}
-
-Match Score: {top[2]}%
-
-- AI Hiring System
-"""
-                )
-
-        st.success("Ranking + Emails Sent ✔️")
-
-    # ---------------- SHOW RANKING ----------------
-    st.subheader("Candidate Ranking")
-
-    c.execute("SELECT name, email, resume FROM users")
-    users = c.fetchall()
-
-    for u in users:
-
-        score = rank_resume(u[2], desc)
-
-        st.write("👤", u[0])
-        st.write("📧", u[1])
-        st.write("⭐ Match Score:", score, "%")
+    for job in jobs:
+        st.subheader(job[3])
+        st.write(job[4])
         st.markdown("---")
+
+# ---------------- ADMIN ----------------
+elif menu == "Admin Panel":
+
+    st.header("🛠️ Admin Dashboard")
+
+    users = get_users()
+    jobs = get_jobs()
+
+    st.metric("Total Students", len(users))
+    st.metric("Total Jobs", len(jobs))
+
+    st.subheader("👨‍🎓 Students")
+    for u in users:
+        st.write(u)
+
+    st.subheader("🏢 Jobs")
+    for j in jobs:
+        st.write(j)
